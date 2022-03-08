@@ -311,6 +311,9 @@ PipeWireOutput::PipeWireOutput(const ConfigBlock &block)
 void
 PipeWireOutput::SetVolume(float _volume)
 {
+	if (thread_loop == nullptr)
+		return;
+
 	const PipeWire::ThreadLoopLock lock(thread_loop);
 
 	float newvol = _volume*_volume*_volume;
