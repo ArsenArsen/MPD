@@ -88,7 +88,7 @@ class PipeWireOutput final : AudioOutput {
 	float volume = 1.0;
 
 	PipeWireMixer *mixer = nullptr;
-	unsigned channels;
+	unsigned channels = 0;
 
 	/**
 	 * The active sample format, needed for PcmSilence().
@@ -128,7 +128,7 @@ class PipeWireOutput final : AudioOutput {
 	 * done each time after the pw_stream got created, thus this
 	 * flag gets set by Open().
 	 */
-	bool restore_volume;
+	bool restore_volume = false;
 
 	bool interrupted;
 	bool paused;
@@ -311,14 +311,18 @@ PipeWireOutput::PipeWireOutput(const ConfigBlock &block)
 void
 PipeWireOutput::SetVolume(float _volume)
 {
-	if (thread_loop == nullptr)
+	if (thread_loop == nullptr) {
+		// set volume before we are even enabled, restore it later
+		restore_volume = true;
+		volume = _volume;
 		return;
+	}
 
 	const PipeWire::ThreadLoopLock lock(thread_loop);
 
 	float newvol = _volume*_volume*_volume;
 
-	if (stream != nullptr && !restore_volume) {
+	if (stream != nullptr && !restore_volume && channels != 0) {
 		float vol[MAX_CHANNELS];
 		std::fill_n(vol, channels, newvol);
 
@@ -326,6 +330,10 @@ PipeWireOutput::SetVolume(float _volume)
 				  SPA_PROP_channelVolumes, channels, vol,
 				  0) != 0)
 			throw std::runtime_error("pw_stream_set_control() failed");
+	} else {
+		// we seem to be called before a stream is opened, restore the
+		// volume later instead
+		restore_volume = true;
 	}
 
 	volume = _volume;
@@ -639,8 +647,8 @@ PipeWireOutput::ParamChanged([[maybe_unused]] uint32_t id,
 			     [[maybe_unused]] const struct spa_pod *param) noexcept
 {
 	if (restore_volume) {
-		SetVolume(volume);
 		restore_volume = false;
+		SetVolume(volume);
 	}
 
 #if defined(ENABLE_DSD) && defined(SPA_AUDIO_DSD_FLAG_NONE)
